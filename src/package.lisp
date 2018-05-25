@@ -31,4 +31,5 @@
 (in-package #:cl-user)
 
 (defpackage #:cl-bear-ssl
-  (:use #:cl #:cffi #:trivial-gray-streams #:usocket))
+  (:use #:cl #:cffi #:trivial-gray-streams #:trivial-garbage #:usocket)
+  (:export #:stream-fd #:make-ssl-client-stream))

@@ -36,7 +36,7 @@
   :long-description "Binding to BearSSL providing SSL/TLS streams."
   :author "Olof-Joachim Frahm <olof@macrolet.net>"
   :license "Simplified BSD License"
-  :depends-on (#:cffi #:trivial-utf-8 #:alexandria #:usocket #:trivial-gray-streams)
+  :depends-on (#:cffi #:trivial-utf-8 #:alexandria #:usocket #:trivial-gray-streams #:trivial-garbage)
   :serial T
   :components ((:module "src"
                 :components

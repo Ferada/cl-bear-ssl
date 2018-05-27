@@ -25,21 +25,9 @@
 ;; THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 ;; (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 ;; OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-(in-package #:cl-user)
 
-(eval-when (:load-toplevel :execute)
-  (asdf:operate 'asdf:load-op 'cffi-grovel))
+(in-package #:cl-user)
 
-(asdf:defsystem #:cl-bear-ssl
-  :description "BearSSL binding."
-  :long-description "Binding to BearSSL, providing SSL/TLS streams."
-  :author "Olof-Joachim Frahm <olof@macrolet.net>"
-  :license "Simplified BSD License"
-  :depends-on (#:cffi #:trivial-utf-8 #:alexandria #:usocket #:trivial-gray-streams #:trivial-garbage)
-  :serial T
-  :components ((:module "src"
-                :components
-                ((:file "package")
-                 (cffi-grovel:grovel-file "grovel")
-                 (:file "client")))))
+(defpackage #:cl+ssl
+  (:use #:cl-bear-ssl)
+  (:export #:stream-fd #:make-ssl-client-stream))

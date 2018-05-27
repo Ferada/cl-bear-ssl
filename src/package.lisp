@@ -25,11 +25,9 @@
 ;; THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 ;; (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 ;; OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+(in-package #:cl-user)
 
-(in-package #:cl-user)
-
-(in-package #:cl-user)
-
 (defpackage #:cl-bear-ssl
   (:use #:cl #:cffi #:trivial-gray-streams #:trivial-garbage #:usocket)
   (:export #:stream-fd #:make-ssl-client-stream))

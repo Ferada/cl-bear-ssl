@@ -28,18 +28,10 @@
 
 (in-package #:cl-user)
 
-(eval-when (:load-toplevel :execute)
-  (asdf:operate 'asdf:load-op 'cffi-grovel))
-
-(asdf:defsystem #:cl-bear-ssl
-  :description "BearSSL binding."
-  :long-description "Binding to BearSSL, providing SSL/TLS streams."
+(asdf:defsystem #:cl-bear-ssl-compat
+  :description "CL-BEAR-SSL compatibility with CL+SSL."
+  :long-description "Provides a compatibility layer to make CL-BEAR-SSL resemble CL+SSL for other packages."
   :author "Olof-Joachim Frahm <olof@macrolet.net>"
   :license "Simplified BSD License"
-  :depends-on (#:cffi #:trivial-utf-8 #:alexandria #:usocket #:trivial-gray-streams #:trivial-garbage)
-  :serial T
-  :components ((:module "src"
-                :components
-                ((:file "package")
-                 (cffi-grovel:grovel-file "grovel")
-                 (:file "client")))))
+  :depends-on (#:cl-bear-ssl)
+  :components ((:module "src" :components ((:file "cl-plus-ssl-compat")))))

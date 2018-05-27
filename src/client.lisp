@@ -156,25 +156,26 @@
   (:method ((stream ccl::basic-stream))
     (ccl::ioblock-device (ccl::stream-ioblock stream T))))
 
-(defun find-trust-anchors ()
-  (let ((tas (foreign-alloc '(:struct br-x509-trust-anchor) :count 2))
-        (null (null-pointer)))
+(defvar *default-trust-anchors*
+  (cons (null-pointer) 0))
+
+(defun load-trust-anchors (&optional (pathname #P"/etc/ssl/certs/ca-certificates.crt"))
+  (let ((null (null-pointer))
+        trust-anchors)
     (with-foreign-objects ((pem '(:struct br-pem-decoder-context))
                            (x509 '(:struct br-x509-decoder-context)))
       (br-pem-decoder-init pem)
-      (br-pem-decoder-setdest pem (callback pem-callback) null)
 
-      (br-x509-decoder-init x509 (callback append-callback) null)
-
-      (let* ((root (alexandria:read-file-into-byte-vector #P"/etc/ssl/certs/GlobalSign_Root_CA_-_R2.pem"))
-             (length (length root)))
+      ;; TODO: chunk-wise
+      (let* ((roots (alexandria:read-file-into-byte-vector pathname))
+             (length (length roots)))
         (with-foreign-object (foreign :unsigned-char length)
           (loop
             for i from 0 below length
-            do (setf (mem-aref foreign :unsigned-char i) (aref root i)))
-          ;; (break)
+            do (setf (mem-aref foreign :unsigned-char i) (aref roots i)))
+          ;; (break "copied ~D into buffer" length)
           (let ((offset 0)
-                ;; name
+                skip
                 *pem-acc*
                 *dn-acc*)
             (loop
@@ -187,118 +188,116 @@
                   (ecase (br-pem-decoder-event pem)
                     (0 (return))
                     (1
-                     ;; (setf name (br-pem-decoder-name pem))
-                     ;; (break "name ~A" name)
-                     )
+                     (let ((name (br-pem-decoder-name pem)))
+                       (when (setf skip (string/= name "CERTIFICATE"))
+                         (warn "Skipping a PEM entry with unexpected name ~W." name))
+                       (br-pem-decoder-setdest
+                        pem
+                        (if skip
+                            (callback zero-callback)
+                            (callback pem-callback))
+                        null)))
                     (2
-                     (let ((length (length *pem-acc*)))
-                       (with-foreign-object (data :unsigned-char length)
-                         (loop
-                           for x in *pem-acc*
-                           for i downfrom (1- length)
-                           do (setf (mem-aref data :unsigned-char i) x))
-                         (setf *pem-acc* NIL)
-                         (br-x509-decoder-push x509 data length)
-                         (let ((decoded-pkey (br-x509-decoder-get-pkey x509)))
+                     (unless skip
+                       (let ((length (length *pem-acc*)))
+                         (with-foreign-object (data :unsigned-char length)
+                           (loop
+                             for x in *pem-acc*
+                             for i downfrom (1- length)
+                             do (setf (mem-aref data :unsigned-char i) x))
+                           (setf *pem-acc* NIL)
+                           (setf *dn-acc* NIL)
+                           (br-x509-decoder-init x509 (callback append-callback) null)
+                           (br-x509-decoder-push x509 data length)
+                           (let ((decoded-pkey (br-x509-decoder-get-pkey x509)))
+                             (if (null-pointer-p decoded-pkey)
+                                 (warn "got null pointer for decoded public key, skipping?")
+                                 (let ((ta (foreign-alloc '(:struct br-x509-trust-anchor))))
+                                   (push ta trust-anchors)
 
-                           (let ((dn (foreign-slot-pointer tas '(:struct br-x509-trust-anchor) 'dn)))
+                                   ;; (break "new ta at ~A, decoded-pkey is ~A" ta decoded-pkey)
 
-                             (let* ((length (length *dn-acc*))
-                                    (name (foreign-alloc :unsigned-char :count length)))
-                               (loop
-                                 for x in *dn-acc*
-                                 for i downfrom (1- length)
-                                 do (setf (mem-aref name :unsigned-char i) x))
-                               (setf *dn-acc* NIL)
-                               (setf (foreign-slot-value dn '(:struct br-x500-name) 'data) name)
-                               (setf (foreign-slot-value dn '(:struct br-x500-name) 'len) length)))
+                                   (let ((dn (foreign-slot-pointer ta '(:struct br-x509-trust-anchor) 'dn)))
 
-                           (when (br-x509-decoder-is-ca x509)
-                             (setf (foreign-slot-value tas '(:struct br-x509-trust-anchor) 'flags) br-x509-ta-ca))
+                                     (let* ((length (length *dn-acc*))
+                                            (name (foreign-alloc :unsigned-char :count length)))
+                                       (loop
+                                         for x in *dn-acc*
+                                         for i downfrom (1- length)
+                                         do (setf (mem-aref name :unsigned-char i) x))
+                                       (setf (foreign-slot-value dn '(:struct br-x500-name) 'data) name)
+                                       (setf (foreign-slot-value dn '(:struct br-x500-name) 'len) length)))
 
-                           (let ((pkey (foreign-slot-pointer tas '(:struct br-x509-trust-anchor) 'pkey)))
-                             (setf (foreign-slot-value pkey '(:struct br-x509-pkey) 'key-type) br-keytype-rsa)
+                                   (when (br-x509-decoder-is-ca x509)
+                                     (setf (foreign-slot-value ta '(:struct br-x509-trust-anchor) 'flags) br-x509-ta-ca))
 
-                             (let ((rsa (foreign-slot-pointer pkey '(:struct br-x509-pkey) 'rsa))
-                                   (decoded-rsa (foreign-slot-pointer decoded-pkey '(:struct br-x509-pkey) 'rsa)))
+                                   (let ((pkey (foreign-slot-pointer ta '(:struct br-x509-trust-anchor) 'pkey)))
 
-                               (let* ((length (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'nlen))
-                                      (source (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'n))
-                                      (target (foreign-alloc :unsigned-char :count length)))
+                                     (ecase (setf (foreign-slot-value pkey '(:struct br-x509-pkey) 'key-type)
+                                                  (foreign-slot-value decoded-pkey '(:struct br-x509-pkey) 'key-type))
+                                       (#.br-keytype-rsa
+                                        (let ((rsa (foreign-slot-pointer pkey '(:struct br-x509-pkey) 'rsa))
+                                              (decoded-rsa (foreign-slot-pointer decoded-pkey '(:struct br-x509-pkey) 'rsa)))
 
-                                 ;; (break "~A ~A ~A" length source target)
+                                          (let* ((length (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'nlen))
+                                                 (source (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'n))
+                                                 (target (foreign-alloc :unsigned-char :count length)))
 
-                                 (loop
-                                   for i from 0 below length
-                                   for byte = (mem-aref source :unsigned-char i)
-                                   do (setf (mem-aref target :unsigned-char i) byte))
+                                            ;; (break "~A ~A ~A" length source target)
 
-                                 (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'n) target)
-                                 (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'nlen) length))
+                                            (loop
+                                              for i from 0 below length
+                                              for byte = (mem-aref source :unsigned-char i)
+                                              do (setf (mem-aref target :unsigned-char i) byte))
 
-                               (let* ((length (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'elen))
-                                      (source (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'e))
-                                      (target (foreign-alloc :unsigned-char :count length)))
+                                            (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'n) target)
+                                            (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'nlen) length))
 
-                                 ;; (break "~A ~A ~A" length source target)
+                                          (let* ((length (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'elen))
+                                                 (source (foreign-slot-value decoded-rsa '(:struct br-rsa-public-key) 'e))
+                                                 (target (foreign-alloc :unsigned-char :count length)))
 
-                                 (loop
-                                   for i from 0 below length
-                                   for byte = (mem-aref source :unsigned-char i)
-                                   do (setf (mem-aref target :unsigned-char i) byte))
+                                            ;; (break "~A ~A ~A" length source target)
 
-                                 (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'e) target)
-                                 (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'elen) length))))))))
+                                            (loop
+                                              for i from 0 below length
+                                              for byte = (mem-aref source :unsigned-char i)
+                                              do (setf (mem-aref target :unsigned-char i) byte))
+
+                                            (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'e) target)
+                                            (setf (foreign-slot-value rsa '(:struct br-rsa-public-key) 'elen) length))))
+                                       (#.br-keytype-ec
+                                        (let ((ec (foreign-slot-pointer pkey '(:struct br-x509-pkey) 'ec))
+                                              (decoded-ec (foreign-slot-pointer decoded-pkey '(:struct br-x509-pkey) 'ec)))
+
+                                          (setf (foreign-slot-value ec '(:struct br-ec-public-key) 'curve)
+                                                (foreign-slot-value decoded-ec '(:struct br-ec-public-key) 'curve))
+
+                                          (let* ((length (foreign-slot-value decoded-ec '(:struct br-ec-public-key) 'qlen))
+                                                 (source (foreign-slot-value decoded-ec '(:struct br-ec-public-key) 'q))
+                                                 (target (foreign-alloc :unsigned-char :count length)))
+
+                                            ;; (break "~A ~A ~A" length source target)
+
+                                            (loop
+                                              for i from 0 below length
+                                              for byte = (mem-aref source :unsigned-char i)
+                                              do (setf (mem-aref target :unsigned-char i) byte))
+
+                                            (setf (foreign-slot-value ec '(:struct br-ec-public-key) 'q) target)
+                                            (setf (foreign-slot-value ec '(:struct br-ec-public-key) 'qlen) length)))))))))))))
                     (3
-                     (break "error?")))))))))
-
-      (values tas 1))))
-
-(defun client (hostname &optional (path "/") (port 443))
-  (with-foreign-objects ((sc '(:struct br-ssl-client-context))
-                         (xc '(:struct br-x509-minimal-context))
-                         (iobuf :unsigned-char br-ssl-bufsize-bidi)
-                         (ioc '(:struct br-sslio-context)))
-    (multiple-value-bind (tas ntas)
-        (find-trust-anchors)
-      (unwind-protect
-           (let ((engine (foreign-slot-pointer sc '(:struct br-ssl-client-context) 'eng)))
-             (br-ssl-client-init-full sc xc tas ntas)
-
-             (br-ssl-engine-set-buffer engine iobuf br-ssl-bufsize-bidi 1)
-             (br-ssl-client-reset sc hostname 0)
-
-             ;; TODO: switch these around in case we can't open a connection anyway
-             (usocket:with-client-socket (socket stream hostname port :element-type '(unsigned-byte 8))
-               ;; (break "~A ~A" socket stream)
-
-               (let ((fd (stream-fd stream)))
-                 (with-foreign-object (key :int)
-                   (setf (mem-ref key :int) fd)
-                   (setf (gethash fd *fds*) stream)
-
-                   (unwind-protect
-                        (progn
-                          (br-sslio-init ioc engine (callback low-read-callback) key (callback low-write-callback) key)
-                          (let ((request (format NIL "GET ~A HTTP/1.1~C~CHost: ~A~C~C~C~C" path #\Return #\Linefeed hostname #\Return #\Linefeed #\Return #\Linefeed)))
-                            (with-foreign-string ((src src-length) request :null-terminated-p NIL)
-                              (br-sslio-write-all ioc src src-length)))
-
-                          (break "last engine error ~D" (br-ssl-engine-last-error engine))
-
-                          (br-sslio-flush ioc)
-
-                          (with-foreign-object (tmp :unsigned-char 512)
-                            (loop
-                              (let ((rlen (br-sslio-read ioc tmp 512)))
-                                (when (< rlen 0)
-                                  (return))
-                                (write-string (foreign-string-to-lisp tmp :count rlen :encoding :iso-8859-1) *standard-output*)
-                                (force-output *standard-output*))))
-
-                          (break "last engine error ~D" (br-ssl-engine-last-error engine)))
-                     (remhash fd *fds*))))))
-        (foreign-free tas)))))
+                     (break "error?"))))))))))
+    ;; (break "before copying them over")
+    (let* ((length (length trust-anchors))
+           (tas (foreign-alloc '(:struct br-x509-trust-anchor) :count length))
+           (i -1))
+      (loop
+        for ta in trust-anchors
+        do (loop
+             for j from 0 below size-of-br-x509-trust-anchor
+             do (setf (mem-aref tas :unsigned-char (incf i)) (mem-aref ta :unsigned-char j))))
+      (values tas length))))
 
 (defclass ssl-stream (trivial-gray-stream-mixin
                       fundamental-binary-input-stream
@@ -376,7 +375,7 @@
   (assert (not (or certificate key password)) (certificate key password))
 
   (multiple-value-bind (tas ntas)
-      (find-trust-anchors)
+      (load-trust-anchors)
 
     (let* ((sc (foreign-alloc '(:struct br-ssl-client-context)))
            (xc (foreign-alloc '(:struct br-x509-minimal-context)))

@@ -11,6 +11,7 @@
 (constant (br-ssl-bufsize-bidi "BR_SSL_BUFSIZE_BIDI"))
 
 (constant (br-keytype-rsa "BR_KEYTYPE_RSA"))
+(constant (br-keytype-ec "BR_KEYTYPE_EC"))
 
 (constant (br-x509-ta-ca "BR_X509_TA_CA"))
 

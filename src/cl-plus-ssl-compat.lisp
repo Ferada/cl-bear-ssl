@@ -29,5 +29,30 @@
 (in-package #:cl-user)
 
 (defpackage #:cl+ssl
-  (:use #:cl-bear-ssl)
-  (:export #:stream-fd #:make-ssl-client-stream))
+  (:use #:cl #:cl-bear-ssl)
+  (:export
+   #:stream-fd
+   #:make-ssl-client-stream
+   #:ensure-initialized
+   #:ssl-check-verify-p
+   #:make-context
+   #:with-global-context
+   #:+ssl-verify-none+
+   #:+ssl-verify-peer+))
+
+(in-package #:cl+ssl)
+
+(defconstant +ssl-verify-none+ '+ssl-verify-none+)
+(defconstant +ssl-verify-peer+ '+ssl-verify-peer+)
+
+(defun ensure-initialized (&key method rand-seed)
+  (declare (ignore method rand-seed)))
+
+(defun ssl-check-verify-p ()
+  T)
+
+(defun make-context (&key &allow-other-keys))
+
+(defmacro with-global-context ((context &key auto-free-p) &body body)
+  (declare (ignore context auto-free-p))
+  `(progn ,@body))

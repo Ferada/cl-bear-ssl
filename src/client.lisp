@@ -495,8 +495,9 @@
   ())
 
 ;; compatibility with cl+ssl / minimal drakma usage
-(defun make-ssl-client-stream (socket &key certificate key password close-callback hostname)
+(defun make-ssl-client-stream (socket &key certificate key password close-callback hostname (verify T))
   (assert (not (or certificate key password)) (certificate key password))
+  (assert verify (verify))
 
   (destructuring-bind (tas . ntas) *default-trust-anchors*
 

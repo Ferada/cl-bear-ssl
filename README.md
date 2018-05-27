@@ -38,13 +38,16 @@ Then, load the compatibility layer for now
 
     (asdf:load-system '#:cl-bear-ssl-compat)
 
-and then *remove* `CL+SSL` from the ASDF of definition of `DRAKMA` and
-then load it (looking for a better way here!) and request something from
-a HTTPS page:
+and then *remove* `CL+SSL` from the ASDF of definitions of
+`DRAKMA`/`DEXADOR` and then load it (looking for a better way here!) and
+request something from an HTTPS page:
 
-    ;; after having removed CL+SSL from DRAKMA!
+    ;; after having removed CL+SSL from DRAKMA/DEXADOR!
     (asdf:load-system '#:drakma)
     (drakma:http-request "https://www.google.com/")
+
+    (asdf:load-system '#:dexador)
+    (dex:get "https://www.google.com/")
 
 The system loads `/etc/ssl/certs/ca-certificates.crt` on startup, if
 your system doesn't have that file you might need to find a replacement

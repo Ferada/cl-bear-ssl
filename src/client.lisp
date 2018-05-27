@@ -92,6 +92,7 @@
       (foreign-slot-pointer ctx '(:struct br-x509-decoder-context) 'pkey)
       (null-pointer)))
 
+;; TODO: eliminate allocations
 (defcallback low-read-callback :int ((read-context :pointer) (data :pointer) (len size-t))
   (handler-case
       (let* ((fd (mem-ref read-context :int))
@@ -110,6 +111,7 @@
       (break "~A" error)
       -1)))
 
+;; TODO: eliminate allocations
 (defcallback low-write-callback :int ((write-context :pointer) (data :pointer) (len size-t))
   (handler-case
       (let* ((fd (mem-ref write-context :int))
@@ -309,6 +311,8 @@
       (load-trust-anchors)
     (setf *default-trust-anchors* (cons tas ntas))))
 
+(defvar *default-buffer-length* 1024)
+
 (defclass ssl-stream (trivial-gray-stream-mixin
                       fundamental-binary-input-stream
                       fundamental-binary-output-stream)
@@ -320,7 +324,25 @@
     :reader ssl-stream-close-callback)
    (foreign-free-list
     :initarg :foreign-free-list
-    :accessor ssl-stream-foreign-free-list)))
+    :accessor ssl-stream-foreign-free-list)
+   (foreign-io-buffer
+    :initarg :foreign-io-buffer
+    :reader foreign-io-buffer)
+   (foreign-io-read-available
+    :initform 0
+    :accessor foreign-io-read-available)
+   (foreign-io-read-offset
+    :initform 0
+    :accessor foreign-io-read-offset)
+   (foreign-io-write-offset
+    :initarg :foreign-io-write-offset
+    :accessor foreign-io-write-offset)
+   (foreign-io-peeked-byte
+    :initform NIL
+    :accessor foreign-io-peeked-byte)
+   (foreign-io-buffer-length
+    :initarg :foreign-io-buffer-length
+    :reader foreign-io-buffer-length)))
 
 (defmethod stream-element-type ((stream ssl-stream))
   '(unsigned-byte 8))
@@ -338,44 +360,104 @@
           (funcall callback)))))
   T)
 
+(defun ssl-stream-flush-writes (stream buffer start length)
+  ;; (format T "flushing ~A ~A ~A ~A~%" stream buffer start length)
+  (br-sslio-write-all (fourth (ssl-stream-foreign-free-list stream)) (mem-aptr buffer :unsigned-char start) length))
+
 (defmethod stream-write-sequence ((stream ssl-stream) seq start end &key)
-  (let ((length (- end start)))
-    (with-foreign-object (src :unsigned-char length)
-      (loop
-        for i from start below end
-        do (setf (mem-aref src :unsigned-char i) (elt seq i)))
-      (br-sslio-write-all (fourth (ssl-stream-foreign-free-list stream)) src length)))
+  (let* ((buffer (foreign-io-buffer stream))
+         (buffer-length (foreign-io-buffer-length stream))
+         (buffer-end (* 2 buffer-length))
+         (write-offset (foreign-io-write-offset stream)))
+    (loop
+      until (eql start end)
+      ;; do (format T "~A ~A ~A ~A~%" start end write-offset buffer-end)
+      do (loop
+           until (or (eql write-offset buffer-end)
+                     (eql start end))
+           do (setf (mem-aref buffer :unsigned-char write-offset) (elt seq start))
+           do (incf start)
+           do (incf write-offset))
+      when (eql write-offset buffer-end)
+        do (progn
+             (ssl-stream-flush-writes stream buffer buffer-length buffer-length)
+             (setf write-offset buffer-length)))
+    (setf (foreign-io-write-offset stream) write-offset))
   seq)
 
 (defmethod stream-write-byte ((stream ssl-stream) b)
-  (stream-write-sequence stream (list b) 0 1)
+  (let* ((buffer-length (foreign-io-buffer-length stream))
+         (write-offset (foreign-io-write-offset stream))
+         (buffer (foreign-io-buffer stream)))
+    (setf (mem-aref buffer :unsigned-char write-offset) b)
+    (let ((buffer-end (* 2 buffer-length)))
+      (if (eql write-offset (1- buffer-end))
+          (progn
+            (ssl-stream-flush-writes stream buffer buffer-length buffer-length)
+            (setf (foreign-io-write-offset stream) buffer-length))
+          (incf (foreign-io-write-offset stream)))
+      ;; (format T "1 1 ~A ~A (write-byte)~%" write-offset buffer-end)
+      ))
   b)
 
 (defmethod stream-finish-output ((stream ssl-stream))
   (stream-force-output stream))
 
 (defmethod stream-force-output ((stream ssl-stream))
+  (let* ((buffer-length (foreign-io-buffer-length stream))
+         (length (- (foreign-io-write-offset stream) buffer-length)))
+    (unless (eql length 0)
+      (ssl-stream-flush-writes stream (foreign-io-buffer stream) buffer-length length)
+      (setf (foreign-io-write-offset stream) buffer-length)))
   (br-sslio-flush (fourth (ssl-stream-foreign-free-list stream)))
   (force-output (gethash (ssl-stream-socket stream) *fds*)))
 
 (defmethod stream-read-sequence ((stream ssl-stream) seq start end &key)
-  (let ((length (- end start)))
-    (with-foreign-object (tmp :unsigned-char length)
-      (loop
-        (let ((rlen (br-sslio-read (fourth (ssl-stream-foreign-free-list stream)) tmp length)))
-          (when (<= rlen 0)
-            (return))
-          (decf length rlen)
-          (loop
-            for i from 0 below rlen
-            do (setf (elt seq start) (mem-aref tmp :unsigned-char i))
-            do (incf start))))))
+  (let* ((read-offset (foreign-io-read-offset stream))
+         (read-available (foreign-io-read-available stream))
+         (buffer-length (foreign-io-buffer-length stream))
+         (buffer (foreign-io-buffer stream)))
+    (loop
+      until (eql start end)
+      ;; do (format T "~A ~A ~A ~A~%" start end read-offset read-available)
+      do (loop
+           until (or (eql start end) (eql read-offset read-available))
+           do (setf (elt seq start) (mem-aref buffer :unsigned-char read-offset))
+           do (incf start)
+           do (incf read-offset))
+      when (eql read-offset read-available)
+        do (progn
+             ;; (format T "reading from SSL~%")
+             (let ((rlen (br-sslio-read (fourth (ssl-stream-foreign-free-list stream)) buffer buffer-length)))
+               ;; (format T "got ~D~%" rlen)
+               (when (<= rlen 0)
+                 ;; TODO: what do on error?
+                 (return))
+               (setf read-offset 0)
+               (setf read-available rlen))))
+    (setf (foreign-io-read-available stream) read-available)
+    (setf (foreign-io-read-offset stream) read-offset))
   start)
 
 (defmethod stream-read-byte ((stream ssl-stream))
-  (let ((buf (list 0)))
-    (stream-read-sequence stream buf 0 1)
-    (car buf)))
+  (let* ((read-offset (foreign-io-read-offset stream))
+         (read-available (foreign-io-read-available stream))
+         (buffer-length (foreign-io-buffer-length stream))
+         (buffer (foreign-io-buffer stream)))
+    (if (< read-offset read-available)
+        (prog1 (mem-aref buffer :unsigned-char read-offset)
+          ;; (format T "read byte from buffer ~D~%" read-offset)
+          (incf (foreign-io-read-offset stream)))
+        (progn
+          ;; (format T "reading from SSL for byte~%")
+          (let ((rlen (br-sslio-read (fourth (ssl-stream-foreign-free-list stream)) buffer buffer-length)))
+            ;; (format T "got ~D~%" rlen)
+            (setf (foreign-io-read-available stream) rlen)
+            (when (<= rlen 0)
+              ;; TODO: what do on error?
+              (return-from stream-read-byte :eof))
+            (prog1 (mem-aref buffer :unsigned-char 0)
+              (setf (foreign-io-read-offset stream) 1)))))))
 
 (defclass ssl-client-stream (ssl-stream)
   ())
@@ -394,10 +476,15 @@
            (foreign-free-list (list sc xc iobuf ioc key))
            (fd (stream-fd socket))
            (stream (ccl::make-fd-stream fd :direction :io :element-type '(unsigned-byte 8)))
+           (io-buffer-length (* 2 *default-buffer-length*))
+           (io-buffer (foreign-alloc :unsigned-char :count io-buffer-length))
            (result (make-instance 'ssl-client-stream
                                   :socket socket
                                   :close-callback close-callback
-                                  :foreign-free-list foreign-free-list)))
+                                  :foreign-free-list foreign-free-list
+                                  :foreign-io-buffer io-buffer
+                                  :foreign-io-write-offset *default-buffer-length*
+                                  :foreign-io-buffer-length *default-buffer-length*)))
 
       ;; we don't strictly need the FD here, any key would suffice
       (setf (mem-ref key :int) fd)
@@ -407,7 +494,8 @@
        result
        (lambda ()
          (remhash fd *fds*)
-         (mapc #'foreign-free foreign-free-list)))
+         (mapc #'foreign-free foreign-free-list)
+         (foreign-free io-buffer)))
 
       (let ((engine (foreign-slot-pointer sc '(:struct br-ssl-client-context) 'eng)))
         (br-ssl-client-init-full sc xc tas ntas)

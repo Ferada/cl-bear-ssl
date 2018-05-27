@@ -23,6 +23,34 @@ for HTTP 2.0 - the protocol itself isn't in scope though.
 Thirdly, this library should also expose a nice API that's not tied to
 OpenSSL conventions and allows more atypical use cases.
 
+# USAGE
+
+Until I find a better way you'll have to add the BearSSL shared library
+to a path that CFFI can search; alternatively use something like
+
+    (pushnew #P".../BearSSL/build/" cffi:*foreign-library-directories*)
+
+to add the directory in question to the list of directories to search.
+BearSSL needs to be built of course, c.f. https://www.bearssl.org, or
+just `git clone https://www.bearssl.org/git/BearSSL` at this time.
+
+Then, load the compatibility layer for now
+
+    (asdf:load-system '#:cl-bear-ssl-compat)
+
+and then *remove* `CL+SSL` from the ASDF of definition of `DRAKMA` and
+then load it (looking for a better way here!) and request something from
+a HTTPS page:
+
+    ;; after having removed CL+SSL from DRAKMA!
+    (asdf:load-system '#:drakma)
+    (drakma:http-request "https://www.google.com/")
+
+The system loads `/etc/ssl/certs/ca-certificates.crt` on startup, if
+your system doesn't have that file you might need to find a replacement
+since, funnily enough, disabling certificate validation isn't
+implemented yet.
+
 # TODO
 
 - Sort out the library thing, possibly with a Makefile that compiles it

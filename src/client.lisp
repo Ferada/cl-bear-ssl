@@ -31,8 +31,8 @@
 (define-foreign-library bear-ssl
   (T (:default "libbearssl")))
 
+;; TODO: add hooks for image startuo/shutdown handling
 (eval-when (:load-toplevel :execute)
-  (pushnew #P"/home/ferada/src/BearSSL/build/" cffi:*foreign-library-directories*)
   (use-foreign-library bear-ssl))
 
 (defcfun br-pem-decoder-init :void

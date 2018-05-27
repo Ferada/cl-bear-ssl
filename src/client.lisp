@@ -23,7 +23,9 @@
   (ctx (:pointer (:struct br-pem-decoder-context))))
 
 (defun br-pem-decoder-name (ctx)
-  (foreign-string-to-lisp (foreign-slot-value ctx '(:struct br-pem-decoder-context) 'name) :max-chars 128))
+  (foreign-string-to-lisp
+   (foreign-slot-value ctx '(:struct br-pem-decoder-context) 'name)
+   :max-chars #.(foreign-slot-count '(:struct br-pem-decoder-context) 'name)))
 
 (defcfun br-ssl-client-init-full :void
   (cc (:pointer (:struct br-ssl-client-context)))
@@ -155,9 +157,6 @@
   #+openmcl
   (:method ((stream ccl::basic-stream))
     (ccl::ioblock-device (ccl::stream-ioblock stream T))))
-
-(defvar *default-trust-anchors*
-  (cons (null-pointer) 0))
 
 (defun load-trust-anchors (&optional (pathname #P"/etc/ssl/certs/ca-certificates.crt"))
   (let ((null (null-pointer))
@@ -296,8 +295,19 @@
         for ta in trust-anchors
         do (loop
              for j from 0 below size-of-br-x509-trust-anchor
-             do (setf (mem-aref tas :unsigned-char (incf i)) (mem-aref ta :unsigned-char j))))
+             do (setf (mem-aref tas :unsigned-char (incf i)) (mem-aref ta :unsigned-char j)))
+        ;; only free the top-level struct, need to keep the smaller buffers around
+        do (foreign-free ta))
       (values tas length))))
+
+;; TODO: protect this?
+(defvar *default-trust-anchors*
+  (cons (null-pointer) 0))
+
+(eval-when (:load-toplevel :execute)
+  (multiple-value-bind (tas ntas)
+      (load-trust-anchors)
+    (setf *default-trust-anchors* (cons tas ntas))))
 
 (defclass ssl-stream (trivial-gray-stream-mixin
                       fundamental-binary-input-stream
@@ -334,7 +344,7 @@
       (loop
         for i from start below end
         do (setf (mem-aref src :unsigned-char i) (elt seq i)))
-      (br-sslio-write-all (fifth (ssl-stream-foreign-free-list stream)) src length)))
+      (br-sslio-write-all (fourth (ssl-stream-foreign-free-list stream)) src length)))
   seq)
 
 (defmethod stream-write-byte ((stream ssl-stream) b)
@@ -345,14 +355,14 @@
   (stream-force-output stream))
 
 (defmethod stream-force-output ((stream ssl-stream))
-  (br-sslio-flush (fifth (ssl-stream-foreign-free-list stream)))
+  (br-sslio-flush (fourth (ssl-stream-foreign-free-list stream)))
   (force-output (gethash (ssl-stream-socket stream) *fds*)))
 
 (defmethod stream-read-sequence ((stream ssl-stream) seq start end &key)
   (let ((length (- end start)))
     (with-foreign-object (tmp :unsigned-char length)
       (loop
-        (let ((rlen (br-sslio-read (fifth (ssl-stream-foreign-free-list stream)) tmp length)))
+        (let ((rlen (br-sslio-read (fourth (ssl-stream-foreign-free-list stream)) tmp length)))
           (when (<= rlen 0)
             (return))
           (decf length rlen)
@@ -374,15 +384,14 @@
 (defun make-ssl-client-stream (socket &key certificate key password close-callback hostname)
   (assert (not (or certificate key password)) (certificate key password))
 
-  (multiple-value-bind (tas ntas)
-      (load-trust-anchors)
+  (destructuring-bind (tas . ntas) *default-trust-anchors*
 
     (let* ((sc (foreign-alloc '(:struct br-ssl-client-context)))
            (xc (foreign-alloc '(:struct br-x509-minimal-context)))
            (iobuf (foreign-alloc :unsigned-char :count br-ssl-bufsize-bidi))
            (ioc (foreign-alloc '(:struct br-sslio-context)))
            (key (foreign-alloc :int))
-           (foreign-free-list (list tas sc xc iobuf ioc key))
+           (foreign-free-list (list sc xc iobuf ioc key))
            (fd (stream-fd socket))
            (stream (ccl::make-fd-stream fd :direction :io :element-type '(unsigned-byte 8)))
            (result (make-instance 'ssl-client-stream

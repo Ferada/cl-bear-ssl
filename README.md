@@ -6,6 +6,8 @@ Released under a Simplified BSD license.
 
 Rough first draft, DRAKMA can use the stream, inefficient as it may be.
 
+Runs on CCL and SBCL.
+
 Uses CFFI/CFFI-GROVEL, trivial-utf-8 and trivial-garbage.
 
 # SUMMARY
@@ -32,9 +34,9 @@ OpenSSL conventions and allows more atypical use cases.
 - sort out trust anchor handling, load that from the default operating
   stores (that'll be a pain, but presumably just follow whatever OpenSSL
   does for this).
-- Make it run on SBCL.
 - Make I/O fast, both on the route through Lisp, but also possibly
   implement a C layer that doesn't always have to jump back into Lisp
   for looking at the buffers.
 - Make I/O cooperate nicely with IOLIB (aka expose the FD).
 - Check that GC works correctly.
+- Make it run on more implementations (ECL, ...?).

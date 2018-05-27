@@ -184,6 +184,9 @@
 (defgeneric stream-fd (stream)
   (:method (stream)
     stream)
+  #+sbcl
+  (:method ((stream sb-sys:fd-stream))
+    (sb-sys:fd-stream-fd stream))
   #+openmcl
   (:method ((stream ccl::basic-stream))
     (ccl::ioblock-device (ccl::stream-ioblock stream T))))
@@ -375,6 +378,7 @@
 (defmethod stream-element-type ((stream ssl-stream))
   '(unsigned-byte 8))
 
+;; TODO: SBCL warns about the ftype?
 (defmethod close ((stream ssl-stream) &key abort)
   (let ((socket (ssl-stream-socket stream)))
     (when socket
@@ -503,7 +507,11 @@
            (key (foreign-alloc :int))
            (foreign-free-list (list sc xc iobuf ioc key))
            (fd (stream-fd socket))
-           (stream (ccl::make-fd-stream fd :direction :io :element-type '(unsigned-byte 8)))
+           (stream
+             #+sbcl
+             (sb-sys:make-fd-stream fd :input T :output T :element-type '(unsigned-byte 8) :buffering :none)
+             #+openmcl
+             (ccl::make-fd-stream fd :direction :io :element-type '(unsigned-byte 8)))
            (io-buffer-length (* 2 *default-buffer-length*))
            (io-buffer (foreign-alloc :unsigned-char :count io-buffer-length))
            (result (make-instance 'ssl-client-stream

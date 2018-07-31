@@ -31,9 +31,16 @@
 (define-foreign-library bear-ssl
   (T (:default "libbearssl")))
 
-;; TODO: add hooks for image startuo/shutdown handling
+;; TODO: add hooks for image startup/shutdown handling
 (eval-when (:load-toplevel :execute)
   (use-foreign-library bear-ssl))
+
+(define-foreign-library helpers
+  (T (:default "helpers")))
+
+;; TODO: add hooks for image startup/shutdown handling
+(eval-when (:load-toplevel :execute)
+  (use-foreign-library helpers))
 
 (defcfun br-pem-decoder-init :void
   (ctx (:pointer (:struct br-pem-decoder-context))))
@@ -342,7 +349,7 @@
       (load-trust-anchors)
     (setf *default-trust-anchors* (cons tas ntas))))
 
-(defvar *default-buffer-length* 1024)
+(defvar *default-buffer-length* 4096)
 
 (defclass ssl-stream (trivial-gray-stream-mixin
                       fundamental-binary-input-stream
@@ -540,6 +547,14 @@
         (br-ssl-engine-set-buffer engine iobuf br-ssl-bufsize-bidi 1)
         (br-ssl-client-reset sc hostname 0)
 
-        (br-sslio-init ioc engine (callback low-read-callback) key (callback low-write-callback) key))
+        #-(or)
+        (br-sslio-init ioc engine (callback low-read-callback) key (callback low-write-callback) key)
+        ;; the following is supposed to be faster ...
+        #+(or)
+        (let ((pointer (make-pointer fd)))
+          (br-sslio-init
+           ioc engine
+           (load-time-value (foreign-symbol-pointer "direct_fd_low_read_callback")) pointer
+           (load-time-value (foreign-symbol-pointer "direct_fd_low_write_callback")) pointer)))
 
       result)))

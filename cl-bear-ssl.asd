@@ -29,7 +29,32 @@
 (in-package #:cl-user)
 
 (eval-when (:load-toplevel :execute)
-  (asdf:operate 'asdf:load-op 'cffi-grovel))
+  (asdf:load-systems 'cffi-grovel 'cffi-toolchain))
+
+;; copied from CFFI
+
+(defclass c-test-lib (asdf:c-source-file)
+  ())
+
+(defmethod asdf:perform ((o asdf:load-op) (c c-test-lib))
+  nil)
+
+(defmethod asdf:perform ((o asdf:load-source-op) (c c-test-lib))
+  nil)
+
+(defmethod asdf:output-files ((o asdf:compile-op) (c c-test-lib))
+  (let ((p (asdf:component-pathname c)))
+    (values
+     (list (make-pathname :defaults p :type (asdf/bundle:bundle-pathname-type :shared-library)))
+     t)))
+
+(defmethod asdf:perform ((o asdf:compile-op) (c c-test-lib))
+  (let ((cffi-toolchain:*cc-flags* `(,@cffi-toolchain:*cc-flags* "-Wall" "-std=c99" "-pedantic"))
+        (cffi-toolchain:*ld-dll-flags* `(,@cffi-toolchain:*ld-dll-flags* "-shared")))
+    (let ((dll (car (asdf:output-files o c))))
+      (uiop:with-temporary-file (:pathname obj)
+        (cffi-toolchain:cc-compile obj (asdf:input-files o c))
+        (apply 'cffi-toolchain:invoke cffi-toolchain:*ld* "-o" dll (append cffi-toolchain:*ld-dll-flags* (list obj)))))))
 
 (asdf:defsystem #:cl-bear-ssl
   :description "BearSSL binding."
@@ -42,4 +67,5 @@
                 :components
                 ((:file "package")
                  (cffi-grovel:grovel-file "grovel")
+                 (:c-test-lib "helpers")
                  (:file "client")))))

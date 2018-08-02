@@ -317,7 +317,7 @@
     :reader ssl-stream-close-callback)
    (foreign-free-entries
     :initarg :foreign-free-entries
-    :accessor ssl-stream-foreign-free-entries)
+    :reader ssl-stream-foreign-free-entries)
    (foreign-io-buffer
     :initarg :foreign-io-buffer
     :reader foreign-io-buffer)
@@ -335,7 +335,10 @@
     :accessor foreign-io-peeked-byte)
    (foreign-io-buffer-length
     :initarg :foreign-io-buffer-length
-    :reader foreign-io-buffer-length)))
+    :reader foreign-io-buffer-length)
+   ;; keeping a reference in case new ones are being loaded in
+   (trust-anchors
+    :initarg :trust-anchors)))
 
 (defun ssl-stream-context (stream)
   (svref (ssl-stream-foreign-free-entries stream) 3))
@@ -359,7 +362,7 @@
        (stream-fd (ssl-stream-socket stream))
        (foreign-io-buffer stream)
        (ssl-stream-foreign-free-entries stream))
-      (setf (ssl-stream-foreign-free-entries stream) NIL)
+      (setf (slot-value stream 'foreign-free-entries) NIL)
       (let ((callback (ssl-stream-close-callback stream)))
         (when callback
           (funcall callback)))))
@@ -497,7 +500,8 @@
                                   :foreign-free-entries foreign-free-entries
                                   :foreign-io-buffer io-buffer
                                   :foreign-io-write-offset buffer-length
-                                  :foreign-io-buffer-length buffer-length)))
+                                  :foreign-io-buffer-length buffer-length
+                                  :trust-anchors tas)))
 
       ;; we don't strictly need the FD here, any key would suffice
       #+(or) (setf (mem-ref key :int) fd)

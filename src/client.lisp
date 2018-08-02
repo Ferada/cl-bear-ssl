@@ -103,7 +103,14 @@
   (cc (:pointer (:struct br-sslio-context))))
 
 (defun br-ssl-engine-last-error (cc)
-  (foreign-slot-value cc '(:struct br-ssl-engine-context) 'err))
+  (let ((error (foreign-slot-value cc '(:struct br-ssl-engine-context) 'err)))
+    (or (foreign-enum-keyword 'br-err error :errorp NIL)
+        error)))
+
+(defun check-engine-error (cc)
+  (let ((error (br-ssl-engine-last-error cc)))
+    (unless (eq error :br-err-ok)
+      (error "BearSSL engine in error state ~A." error))))
 
 (defun br-ssl-engine-set-x509 (cc x509ctx)
   (setf (foreign-slot-value cc '(:struct br-ssl-engine-context) 'x509ctx) x509ctx))
@@ -153,6 +160,8 @@
   (:method ((stream ccl::basic-stream))
     (ccl::ioblock-device (ccl::stream-ioblock stream T))))
 
+;; TODO: add finalizer for these
+;; TODO: wrap these in something more friendly?
 (defun load-trust-anchors (&optional (pathname #P"/etc/ssl/certs/ca-certificates.crt"))
   (let ((null (null-pointer))
         trust-anchors)
@@ -513,6 +522,7 @@
         (br-ssl-client-init-full sc xc tas ntas)
 
         (br-ssl-engine-set-buffer engine iobuf br-ssl-bufsize-bidi 1)
+        ;; TODO: enable SNI here
         (br-ssl-client-reset sc hostname 0)
 
         #+(or)
@@ -523,6 +533,8 @@
           (br-sslio-init
            ioc engine
            (load-time-value (foreign-symbol-pointer "direct_fd_low_read_callback")) pointer
-           (load-time-value (foreign-symbol-pointer "direct_fd_low_write_callback")) pointer)))
+           (load-time-value (foreign-symbol-pointer "direct_fd_low_write_callback")) pointer))
+
+        (check-engine-error engine))
 
       result)))

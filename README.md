@@ -4,7 +4,8 @@ Copyright (C) 2018 Olof-Joachim Frahm
 
 Released under a Simplified BSD license.
 
-Rough first draft, DRAKMA can use the stream, inefficient as it may be.
+Rough first draft, DRAKMA/DEXADOR can use the stream, inefficient as it
+may be.
 
 Runs on CCL and SBCL.
 
@@ -23,7 +24,8 @@ That said it does support reading Reddit.
 I find the OpenSSL API hard to understand and presumably that also
 hinders others to work on CL+SSL.  This library should firstly be a
 drop-in replacement for CL+SSL for the typical use cases, that being
-DRAKMA and whatever other HTTP clients are out there.  That's the MVP.
+DRAKMA, DEXADOR and whatever other HTTP clients are out there.  That's
+the MVP.
 
 Secondly it should also expose all the right suites to make it usable
 for HTTP 2.0 - the protocol itself isn't in scope though.
@@ -37,6 +39,7 @@ Until I find a better way you'll have to add the BearSSL shared library
 to a path that CFFI can search; alternatively use something like
 
     (pushnew #P".../BearSSL/build/" cffi:*foreign-library-directories*)
+    (pushnew #P".../cl-bear-ssl/src/" cffi:*foreign-library-directories*)
 
 to add the directory in question to the list of directories to search.
 BearSSL needs to be built of course, c.f. https://www.bearssl.org, or
@@ -46,9 +49,9 @@ Then, load the compatibility layer for now
 
     (asdf:load-system '#:cl-bear-ssl-compat)
 
-and then *remove* `CL+SSL` from the ASDF of definitions of
-`DRAKMA`/`DEXADOR` and then load it (looking for a better way here!) and
-request something from an HTTPS page:
+and then *remove* CL+SSL from the ASDF of definitions of DRAKMA/DEXADOR
+and then load it (looking for a better way here!) and request something
+from an HTTPS page:
 
     ;; after having removed CL+SSL from DRAKMA/DEXADOR!
     (asdf:load-system '#:drakma)
@@ -79,3 +82,4 @@ implemented yet.
 - Make I/O cooperate nicely with IOLIB (aka expose the FD).
 - Check that GC works correctly.
 - Make it run on more implementations (ECL, ...?).
+- Enable client certificates.

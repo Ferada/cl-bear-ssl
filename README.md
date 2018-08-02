@@ -10,6 +10,14 @@ Runs on CCL and SBCL.
 
 Uses CFFI/CFFI-GROVEL, trivial-utf-8 and trivial-garbage.
 
+**Don't use this for anything critical!**  Like your online banking,
+with important passwords, etc.  Firstly BearSSL itself says
+"beta-quality software", so this one here is basically pre-alpha.
+Secondly I've not even started to look for logic bugs, memory isn't
+being handled carefully at all and in general *here be bugs*.
+
+That said it does support reading Reddit.
+
 # SUMMARY
 
 I find the OpenSSL API hard to understand and presumably that also

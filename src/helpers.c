@@ -1,6 +1,10 @@
 #include <unistd.h>
 #include <errno.h>
 
+int zero_callback(void) {
+  return 0;
+}
+
 int direct_fd_low_read_callback(void* read_context, unsigned char* data, size_t len) {
   for (;;) {
     ssize_t rlen;

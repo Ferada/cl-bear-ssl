@@ -67,5 +67,8 @@
                 :components
                 ((:file "package")
                  (cffi-grovel:grovel-file "grovel")
+                 ;; ideally this one would be good enough
+                 (:file "non-native")
+                 ;; then again, why not use native functions if we can
                  (:c-test-lib "helpers")
                  (:file "client")))))
